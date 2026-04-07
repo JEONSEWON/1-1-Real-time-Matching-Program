@@ -1,0 +1,127 @@
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&family=Space+Mono:wght@400;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-display: 'Syne', sans-serif;
+  --font-body: 'DM Sans', sans-serif;
+  --font-mono: 'Space Mono', monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  background: #07070f;
+  color: #e2e8f0;
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+}
+
+/* 스크롤바 */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: #0f0f1a; }
+::-webkit-scrollbar-thumb { background: #2d2d4a; border-radius: 2px; }
+
+/* 타이머 프로그레스바 애니메이션 */
+@keyframes timer-shrink {
+  from { width: 100%; }
+  to { width: 0%; }
+}
+
+.timer-bar {
+  animation: timer-shrink linear forwards;
+}
+
+/* 선택지 호버 효과 */
+.option-btn {
+  transition: all 0.15s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.option-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, #6d28d920, transparent);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.option-btn:hover::before {
+  opacity: 1;
+}
+
+.option-btn.selected {
+  border-color: #a78bfa !important;
+  background: #1e1040 !important;
+}
+
+.option-btn.selected::before {
+  opacity: 1;
+}
+
+/* 채팅 메시지 */
+.chat-bubble-me {
+  background: linear-gradient(135deg, #6d28d9, #5b21b6);
+  border-radius: 16px 16px 4px 16px;
+}
+
+.chat-bubble-other {
+  background: #1e1e30;
+  border-radius: 16px 16px 16px 4px;
+}
+
+/* 글로우 효과 */
+.glow-accent {
+  box-shadow: 0 0 20px #6d28d940, 0 0 40px #6d28d920;
+}
+
+.glow-neon {
+  box-shadow: 0 0 15px #4ade8050, 0 0 30px #4ade8020;
+}
+
+/* 카운트다운 숫자 */
+@keyframes countdown-pop {
+  0% { transform: scale(1.5); opacity: 0; }
+  20% { transform: scale(1); opacity: 1; }
+  80% { transform: scale(1); opacity: 1; }
+  100% { transform: scale(0.8); opacity: 0; }
+}
+
+.countdown-number {
+  animation: countdown-pop 0.9s ease-out forwards;
+}
+
+/* 매칭 카드 등장 */
+@keyframes match-appear {
+  from {
+    opacity: 0;
+    transform: scale(0.9) translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.match-card {
+  animation: match-appear 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+/* 노이즈 텍스처 오버레이 */
+.noise-overlay::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 1000;
+}
