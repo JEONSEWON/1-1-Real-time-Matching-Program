@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import {
   GameConfig, GameSession, Question, Match, Participant, GamePhase,
@@ -15,6 +16,7 @@ interface GameRoomProps {
 }
 
 export default function GameRoom({ nickname }: GameRoomProps) {
+  const router = useRouter();
   const [config, setConfig] = useState<GameConfig | null>(null);
   const [phase, setPhase] = useState<GamePhase>('waiting');
   const [participants, setParticipants] = useState<Participant[]>([]);
@@ -248,12 +250,19 @@ export default function GameRoom({ nickname }: GameRoomProps) {
   return (
     <div className="h-screen flex flex-col bg-bg overflow-hidden">
       <header className="flex items-center justify-between px-6 py-3 border-b border-border flex-shrink-0 bg-surface/50 backdrop-blur-sm z-10">
-        <div className="flex items-center gap-3">
+        <button
+          onClick={async () => {
+            await supabase.from('participants').update({ is_online: false }).eq('nickname', nickname);
+            localStorage.removeItem('nickname');
+            window.location.href = '/';
+          }}
+          className="flex items-center gap-3 hover:opacity-70 transition-opacity cursor-pointer"
+        >
           <div className="w-6 h-6 rounded-md bg-gradient-to-br from-violet-600 to-purple-700 flex items-center justify-center">
             <span className="text-white text-xs font-bold">Y</span>
           </div>
           <span className="font-display font-bold text-white tracking-tight">YouMatch</span>
-        </div>
+        </button>
         <div className="flex items-center gap-4">
           {phase === 'playing' && (
             <div className="flex items-center gap-2">
