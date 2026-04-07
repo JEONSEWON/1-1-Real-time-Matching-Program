@@ -28,6 +28,7 @@ export default function GameRoom({ nickname }: GameRoomProps) {
   const [myMatches, setMyMatches] = useState<Match[]>([]);
   const [countdownNum, setCountdownNum] = useState<number | null>(null);
   const [noMatchMessage, setNoMatchMessage] = useState('');
+  const [noMatchCountdown, setNoMatchCountdown] = useState(5);
 
   const sessionTimerRef = useRef<NodeJS.Timeout | null>(null);
   const lastAnswerSentRef = useRef<Record<number, boolean>>({});
@@ -133,6 +134,23 @@ export default function GameRoom({ nickname }: GameRoomProps) {
       );
     }
   };
+
+  // 매칭 없을 때 자동으로 다음 세션 대기로 이동
+  useEffect(() => {
+    const _isLast = (config?.current_session_number ?? 0) >= (config?.total_sessions ?? 10);
+    if (phase !== 'result' || myMatches.length > 0 || _isLast) return;
+    let secs = 5;
+    setNoMatchCountdown(secs);
+    const interval = setInterval(() => {
+      secs -= 1;
+      setNoMatchCountdown(secs);
+      if (secs <= 0) {
+        clearInterval(interval);
+        setPhase('waiting');
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [phase, myMatches.length, config]);
 
   const submitAnswer = useCallback(async (questionNumber: number, answerIndex: number) => {
     if (!currentSession || lastAnswerSentRef.current[questionNumber]) return;
@@ -367,12 +385,15 @@ export default function GameRoom({ nickname }: GameRoomProps) {
                 {myMatches.length === 0 && (
                   <div className="flex flex-col items-center justify-center py-16">
                     <div className="text-6xl mb-4">🔍</div>
-                    <p className="text-slate-500 text-center max-w-xs">다음 세션에서는 비슷한 취향의 사람을 만날 수 있을 거예요</p>
+                    <p className="text-slate-500 text-center max-w-xs">이번 세션에서는 70% 이상 일치한 상대가 없었어요</p>
                     {!isLastSession && (
                       <div className="mt-6 bg-surface border border-border rounded-xl px-6 py-4 text-center">
-                        <p className="text-xs text-slate-500">다음 세션이 곧 시작됩니다</p>
-                        <p className="font-mono text-accent-light font-bold text-lg mt-1">세션 {sessionNumber + 1} / {totalSessions}</p>
+                        <p className="text-xs text-slate-500 mb-2">다음 세션 대기 화면으로 이동합니다</p>
+                        <p className="font-mono font-bold text-4xl text-accent-light">{noMatchCountdown}</p>
                       </div>
+                    )}
+                    {isLastSession && (
+                      <p className="mt-4 text-slate-600 text-sm">모든 세션이 종료되었습니다</p>
                     )}
                   </div>
                 )}
