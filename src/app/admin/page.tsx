@@ -1,400 +1,254 @@
-'use client';
+import Link from 'next/link';
+import { ArrowRight, CheckCircle, Zap, Shield, BarChart3, Bell, Globe } from 'lucide-react';
+import ClientHeader from '@/components/ClientHeader';
+import type { Metadata } from 'next';
 
-import { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase';
-import { GameConfig, GameSession, Participant, Question } from '@/lib/types';
+export const metadata: Metadata = {
+  title: 'checkapi.io | Simple API Monitoring by Axiom Technologies',
+  description: 'Professional API uptime monitoring and public status pages. A core technology by Axiom Technologies for solo founders and engineering teams. Free tier available.',
+  openGraph: {
+    title: 'checkapi.io | Simple API Monitoring by Axiom Technologies',
+    description: 'Professional API uptime monitoring and public status pages.',
+    url: 'https://checkapi.io',
+    siteName: 'CheckAPI by Axiom Technologies',
+    type: 'website',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'checkapi.io | Simple API Monitoring by Axiom Technologies',
+    description: 'Professional API uptime monitoring and public status pages. Free tier available.',
+    creator: '@imwon_dev',
+  },
+};
 
-const ADMIN_PASSWORD = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || 'admin1234';
-
-export default function AdminPage() {
-  const [authed, setAuthed] = useState(false);
-  const [pw, setPw] = useState('');
-  const [pwError, setPwError] = useState('');
-
-  const [config, setConfig] = useState<GameConfig | null>(null);
-  const [sessions, setSessions] = useState<GameSession[]>([]);
-  const [participants, setParticipants] = useState<Participant[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState('');
-  const [editStartTime, setEditStartTime] = useState('');
-  const [selectedSession, setSelectedSession] = useState<string | null>(null);
-  const [sessionQuestions, setSessionQuestions] = useState<Question[]>([]);
-  const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
-
-  useEffect(() => {
-    if (!authed) return;
-    loadAdminData();
-    const interval = setInterval(loadAdminData, 5000);
-    return () => clearInterval(interval);
-  }, [authed]);
-
-  const loadAdminData = async () => {
-    const [configRes, sessionsRes, participantsRes] = await Promise.all([
-      supabase.from('game_config').select('*').eq('id', 1).single(),
-      supabase.from('game_sessions').select('*').order('session_number'),
-      supabase.from('participants').select('*').eq('is_online', true),
-    ]);
-    if (configRes.data) {
-      setConfig(configRes.data);
-      if (configRes.data.session_start_time) {
-        const d = new Date(configRes.data.session_start_time);
-        setEditStartTime(d.toISOString().slice(0, 16));
-      }
-    }
-    if (sessionsRes.data) setSessions(sessionsRes.data);
-    if (participantsRes.data) setParticipants(participantsRes.data);
-  };
-
-  const showMsg = (msg: string) => {
-    setMessage(msg);
-    setTimeout(() => setMessage(''), 3000);
-  };
-
-  const startSession = async (sessionNumber: number) => {
-    setLoading(true);
-    try {
-      const res = await fetch('/api/admin/start-session', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionNumber }),
-      });
-      if (!res.ok) throw new Error('Failed');
-      showMsg(`세션 ${sessionNumber} 시작 완료!`);
-      await loadAdminData();
-    } catch (e) {
-      showMsg('오류: 세션 시작 실패');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const updateStartTime = async () => {
-    if (!editStartTime) return;
-    const res = await fetch('/api/admin/update-config', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_start_time: new Date(editStartTime).toISOString() }),
-    });
-    if (res.ok) showMsg('시작 시간 업데이트 완료');
-  };
-
-  const resetGame = async () => {
-    if (!confirm('게임을 초기화하시겠습니까? 모든 세션, 답변, 매칭 데이터가 삭제됩니다.')) return;
-    setLoading(true);
-    await supabase.from('chat_messages').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    await supabase.from('matches').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    await supabase.from('answers').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    await supabase.from('questions').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    await supabase.from('game_sessions').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    await supabase.from('game_config').update({
-      is_active: false,
-      current_session_number: 0,
-      updated_at: new Date().toISOString(),
-    }).eq('id', 1);
-    showMsg('게임 초기화 완료');
-    setLoading(false);
-    await loadAdminData();
-  };
-
-  const loadSessionQuestions = async (sessionId: string) => {
-    setSelectedSession(sessionId);
-    const { data } = await supabase.from('questions').select('*')
-      .eq('session_id', sessionId).order('question_number');
-    if (data) setSessionQuestions(data);
-  };
-
-  const saveQuestionEdit = async () => {
-    if (!editingQuestion) return;
-    await supabase.from('questions').update({
-      question_text: editingQuestion.question_text,
-      options: editingQuestion.options,
-    }).eq('id', editingQuestion.id);
-    setEditingQuestion(null);
-    await loadSessionQuestions(selectedSession!);
-    showMsg('문제 수정 완료');
-  };
-
-  // 로그인
-  if (!authed) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-bg p-4">
-        <div className="w-full max-w-sm bg-surface border border-border rounded-2xl p-8">
-          <h1 className="font-display font-bold text-2xl text-white mb-6 text-center">관리자 로그인</h1>
-          <input
-            type="password"
-            value={pw}
-            onChange={(e) => { setPw(e.target.value); setPwError(''); }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                if (pw === ADMIN_PASSWORD) setAuthed(true);
-                else setPwError('비밀번호가 틀렸습니다');
-              }
-            }}
-            placeholder="비밀번호 입력"
-            className="w-full px-4 py-3 rounded-xl bg-bg border border-border text-white placeholder-slate-600 focus:outline-none focus:border-violet-500 mb-2"
-          />
-          {pwError && <p className="text-red-400 text-sm mb-2">{pwError}</p>}
-          <button
-            onClick={() => {
-              if (pw === ADMIN_PASSWORD) setAuthed(true);
-              else setPwError('비밀번호가 틀렸습니다');
-            }}
-            className="w-full py-3 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-semibold transition-colors"
-          >
-            로그인
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  const nextSessionNumber = (config?.current_session_number ?? 0) + 1;
-  const canStartNextSession = nextSessionNumber <= (config?.total_sessions ?? 10);
-  const activeSession = sessions.find(s => s.status === 'active');
-
+export default function HomePage() {
   return (
-    <div className="min-h-screen bg-bg text-white p-6">
-      <div className="max-w-5xl mx-auto">
-        {/* 헤더 */}
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h1 className="font-display font-bold text-3xl text-white">관리자 패널</h1>
-            <p className="text-slate-500 text-sm mt-1">YouMatch 게임 컨트롤</p>
+    <div className="min-h-screen bg-gradient-to-b from-white to-gray-50 dark:from-gray-950 dark:to-gray-900">
+      <ClientHeader />
+
+      {/* Hero Section */}
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-16">
+        <div className="text-center">
+          <div className="inline-flex items-center gap-2 bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-400 text-sm font-medium px-4 py-2 rounded-full mb-8">
+            <CheckCircle className="h-4 w-4" />
+            Free for Commercial Use — No restrictions
           </div>
-          {message && (
-            <div className="bg-neon/10 border border-neon/30 text-neon px-4 py-2 rounded-xl text-sm font-medium">
-              {message}
-            </div>
-          )}
+          <h1 className="text-5xl md:text-6xl font-bold text-gray-900 dark:text-white mb-6 leading-tight">
+            Stop finding out your API
+            <br />
+            <span className="bg-gradient-to-r from-green-600 to-emerald-600 bg-clip-text text-transparent">
+              is down from your users.
+            </span>
+          </h1>
+          <p className="text-xl text-gray-600 dark:text-gray-400 mb-10 max-w-2xl mx-auto">
+            Minimalist API monitoring & status pages built for solo founders.
+            5-minute setup, zero bloat, 24/7 peace of mind.
+          </p>
+          <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
+            <Link href="/register" className="bg-green-600 text-white px-8 py-4 rounded-xl hover:bg-green-700 transition font-semibold text-lg flex items-center gap-2 shadow-lg shadow-green-200 dark:shadow-green-900">
+              Protect My API for Free
+              <ArrowRight className="h-5 w-5" />
+            </Link>
+            <a href="#pricing" className="text-gray-600 dark:text-gray-400 hover:text-green-600 dark:hover:text-green-400 transition px-6 py-4">
+              View Pricing →
+            </a>
+          </div>
+          <p className="text-sm text-gray-400 dark:text-gray-500 mt-4">
+            No credit card required · 5-minute setup · 10 monitors free
+          </p>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* 좌측: 게임 컨트롤 */}
-          <div className="lg:col-span-2 space-y-6">
-
-            {/* 현재 상태 */}
-            <div className="bg-surface border border-border rounded-xl p-5">
-              <h2 className="font-semibold text-slate-200 mb-4">현재 상태</h2>
-              <div className="grid grid-cols-3 gap-4">
-                <div className="bg-bg rounded-lg p-3 text-center">
-                  <div className="font-mono font-bold text-2xl text-accent-light">
-                    {config?.current_session_number ?? 0}
+        {/* Dashboard Preview */}
+        <div className="mt-16 relative">
+          <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-2xl overflow-hidden">
+            <div className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 py-3 flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-red-400" />
+              <div className="w-3 h-3 rounded-full bg-yellow-400" />
+              <div className="w-3 h-3 rounded-full bg-green-400" />
+              <span className="ml-4 text-sm text-gray-500 dark:text-gray-400">checkapi.io/dashboard</span>
+            </div>
+            <div className="p-8">
+              <div className="grid grid-cols-4 gap-4 mb-8">
+                {[
+                  { label: 'Total Monitors', value: '8', color: 'text-gray-900 dark:text-white' },
+                  { label: 'Online', value: '8', color: 'text-green-600 dark:text-green-400' },
+                  { label: 'Offline', value: '0', color: 'text-red-500' },
+                  { label: 'Avg Uptime', value: '99.9%', color: 'text-green-600 dark:text-green-400' },
+                ].map((stat) => (
+                  <div key={stat.label} className="bg-gray-50 dark:bg-gray-800 rounded-xl p-4 border border-gray-100 dark:border-gray-700">
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">{stat.label}</p>
+                    <p className={`text-2xl font-bold ${stat.color}`}>{stat.value}</p>
                   </div>
-                  <div className="text-xs text-slate-500 mt-1">현재 세션</div>
+                ))}
+              </div>
+              <div className="relative bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 mb-6">
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="font-semibold text-gray-900 dark:text-white">Response Time — Last 24h</h2>
+                  <span className="text-xs text-gray-400 dark:text-gray-500">Updated 30s ago</span>
                 </div>
-                <div className="bg-bg rounded-lg p-3 text-center">
-                  <div className="font-mono font-bold text-2xl text-neon">{participants.length}</div>
-                  <div className="text-xs text-slate-500 mt-1">접속 중</div>
+                <div className="flex items-end gap-1 h-24">
+                  {[40,45,42,38,44,80,120,95,48,42,44,41,39,43,46,42,40,38,44,43,41,45,42,40].map((h, i) => (
+                    <div key={i} className={`flex-1 rounded-sm ${h > 70 ? 'bg-red-400' : 'bg-green-400'}`} style={{ height: `${(h / 120) * 100}%` }} />
+                  ))}
                 </div>
-                <div className="bg-bg rounded-lg p-3 text-center">
-                  <div className={`font-mono font-bold text-2xl ${activeSession ? 'text-coral' : 'text-slate-500'}`}>
-                    {activeSession ? '진행 중' : '대기'}
-                  </div>
-                  <div className="text-xs text-slate-500 mt-1">게임 상태</div>
+                <div className="absolute top-12 left-1/3 bg-red-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-lg">
+                  ⚡ Latency spike detected — Slack alert sent in 1s
                 </div>
               </div>
-            </div>
-
-            {/* 세션 제어 */}
-            <div className="bg-surface border border-border rounded-xl p-5">
-              <h2 className="font-semibold text-slate-200 mb-4">세션 제어</h2>
-
-              {activeSession ? (
-                <div className="bg-coral/10 border border-coral/30 rounded-lg p-4 mb-4">
-                  <p className="text-coral text-sm font-medium">
-                    🔴 세션 {activeSession.session_number} 진행 중
-                  </p>
-                  <p className="text-slate-400 text-xs mt-1">
-                    시작: {new Date(activeSession.started_at!).toLocaleTimeString('ko-KR')}
-                  </p>
-                </div>
-              ) : (
-                <div className="bg-neon/5 border border-neon/20 rounded-lg p-4 mb-4">
-                  <p className="text-neon text-sm font-medium">
-                    ✅ 다음 세션: {nextSessionNumber} / {config?.total_sessions ?? 10}
-                  </p>
-                  <p className="text-slate-400 text-xs mt-1">
-                    세션을 시작하면 Claude AI가 문제를 자동 생성합니다 (약 5~10초 소요)
-                  </p>
-                </div>
-              )}
-
-              <div className="flex gap-3">
-                <button
-                  onClick={() => startSession(nextSessionNumber)}
-                  disabled={loading || !!activeSession || !canStartNextSession}
-                  className="flex-1 py-3 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold transition-colors"
-                >
-                  {loading ? '처리 중...' : `세션 ${nextSessionNumber} 시작`}
-                </button>
-                <button
-                  onClick={resetGame}
-                  disabled={loading}
-                  className="px-4 py-3 rounded-xl border border-red-800/50 text-red-400 hover:bg-red-900/20 transition-colors text-sm"
-                >
-                  초기화
-                </button>
-              </div>
-            </div>
-
-            {/* 시작 시간 설정 */}
-            <div className="bg-surface border border-border rounded-xl p-5">
-              <h2 className="font-semibold text-slate-200 mb-4">세션 시작 시간 설정</h2>
-              <div className="flex gap-3">
-                <input
-                  type="datetime-local"
-                  value={editStartTime}
-                  onChange={(e) => setEditStartTime(e.target.value)}
-                  className="flex-1 px-4 py-2.5 rounded-xl bg-bg border border-border text-white focus:outline-none focus:border-violet-500 text-sm"
-                />
-                <button
-                  onClick={updateStartTime}
-                  className="px-5 py-2.5 rounded-xl bg-violet-600/80 hover:bg-violet-600 text-white text-sm font-medium transition-colors"
-                >
-                  저장
-                </button>
-              </div>
-              <p className="text-xs text-slate-600 mt-2">참가자 화면에 예정 시간이 표시됩니다</p>
-            </div>
-
-            {/* 세션별 문제 수정 */}
-            <div className="bg-surface border border-border rounded-xl p-5">
-              <h2 className="font-semibold text-slate-200 mb-4">문제 조회 및 수정</h2>
-
-              {sessions.length === 0 ? (
-                <p className="text-slate-500 text-sm">아직 진행된 세션이 없습니다</p>
-              ) : (
-                <>
-                  <div className="flex flex-wrap gap-2 mb-4">
-                    {sessions.map(s => (
-                      <button
-                        key={s.id}
-                        onClick={() => loadSessionQuestions(s.id)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                          selectedSession === s.id
-                            ? 'bg-violet-600 text-white'
-                            : 'bg-bg border border-border text-slate-400 hover:text-white'
-                        }`}
-                      >
-                        세션 {s.session_number}
-                        <span className={`ml-1 ${
-                          s.status === 'active' ? 'text-neon' :
-                          s.status === 'completed' ? 'text-slate-500' : 'text-slate-600'
-                        }`}>
-                          {s.status === 'active' ? '●' : s.status === 'completed' ? '✓' : '○'}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-
-                  {selectedSession && sessionQuestions.length > 0 && (
-                    <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
-                      {sessionQuestions.map((q) => (
-                        <div key={q.id} className="bg-bg border border-border rounded-lg p-3">
-                          {editingQuestion?.id === q.id ? (
-                            <div className="space-y-2">
-                              <textarea
-                                value={editingQuestion.question_text}
-                                onChange={(e) => setEditingQuestion({ ...editingQuestion, question_text: e.target.value })}
-                                className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-white text-sm focus:outline-none focus:border-violet-500 resize-none"
-                                rows={2}
-                              />
-                              {editingQuestion.options.map((opt, i) => (
-                                <input
-                                  key={i}
-                                  value={opt}
-                                  onChange={(e) => {
-                                    const newOpts = [...editingQuestion.options];
-                                    newOpts[i] = e.target.value;
-                                    setEditingQuestion({ ...editingQuestion, options: newOpts });
-                                  }}
-                                  className="w-full px-3 py-1.5 bg-surface border border-border rounded-lg text-white text-sm focus:outline-none focus:border-violet-500"
-                                  placeholder={`보기 ${i + 1}`}
-                                />
-                              ))}
-                              <div className="flex gap-2">
-                                <button onClick={saveQuestionEdit} className="px-3 py-1.5 bg-violet-600 hover:bg-violet-500 text-white text-xs rounded-lg transition-colors">저장</button>
-                                <button onClick={() => setEditingQuestion(null)} className="px-3 py-1.5 bg-bg border border-border text-slate-400 text-xs rounded-lg hover:text-white transition-colors">취소</button>
-                              </div>
-                            </div>
-                          ) : (
-                            <div>
-                              <div className="flex items-start justify-between gap-2">
-                                <div className="flex-1">
-                                  <span className="text-xs font-mono text-slate-600 mr-2">Q{q.question_number}</span>
-                                  <span className="text-sm text-white">{q.question_text}</span>
-                                  <div className="flex flex-wrap gap-1 mt-1.5">
-                                    {q.options.map((opt, i) => (
-                                      <span key={i} className="text-xs bg-border text-slate-400 px-2 py-0.5 rounded">{opt}</span>
-                                    ))}
-                                  </div>
-                                </div>
-                                <button
-                                  onClick={() => setEditingQuestion({ ...q })}
-                                  className="text-xs text-slate-500 hover:text-accent-light transition-colors flex-shrink-0 mt-0.5"
-                                >
-                                  수정
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          </div>
-
-          {/* 우측: 참가자 목록 */}
-          <div className="space-y-6">
-            <div className="bg-surface border border-border rounded-xl p-5">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="font-semibold text-slate-200">접속 중인 참가자</h2>
-                <span className="font-mono text-sm text-neon">{participants.length}명</span>
-              </div>
-              <div className="space-y-1 max-h-64 overflow-y-auto">
-                {participants.length === 0 ? (
-                  <p className="text-slate-500 text-sm">접속자 없음</p>
-                ) : (
-                  [...participants].sort((a, b) => a.nickname.localeCompare(b.nickname, 'ko'))
-                    .map(p => (
-                      <div key={p.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg">
-                        <div className="w-1.5 h-1.5 rounded-full bg-neon flex-shrink-0" />
-                        <span className="text-sm text-slate-300">{p.nickname}</span>
+              <div className="space-y-3">
+                {[
+                  { name: 'Production API', url: 'api.yourapp.com', uptime: '99.9%' },
+                  { name: 'Staging Environment', url: 'staging-api.yourapp.com', uptime: '99.8%' },
+                  { name: 'Payment Webhook', url: 'hooks.yourapp.com/stripe', uptime: '100%' },
+                ].map((monitor) => (
+                  <div key={monitor.name} className="flex items-center justify-between bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-700 rounded-lg px-4 py-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-2.5 h-2.5 rounded-full bg-green-500" />
+                      <div>
+                        <p className="font-medium text-gray-900 dark:text-white text-sm">{monitor.name}</p>
+                        <p className="text-xs text-gray-400 dark:text-gray-500">{monitor.url}</p>
                       </div>
-                    ))
-                )}
-              </div>
-            </div>
-
-            {/* 세션 히스토리 */}
-            <div className="bg-surface border border-border rounded-xl p-5">
-              <h2 className="font-semibold text-slate-200 mb-4">세션 히스토리</h2>
-              <div className="space-y-2">
-                {Array.from({ length: config?.total_sessions ?? 10 }, (_, i) => i + 1).map(num => {
-                  const session = sessions.find(s => s.session_number === num);
-                  return (
-                    <div key={num} className="flex items-center justify-between">
-                      <span className="text-sm text-slate-400">세션 {num}</span>
-                      <span className={`text-xs font-medium ${
-                        !session ? 'text-slate-600' :
-                        session.status === 'active' ? 'text-coral' :
-                        session.status === 'completed' ? 'text-neon' : 'text-slate-500'
-                      }`}>
-                        {!session ? '미시작' :
-                         session.status === 'active' ? '진행 중' :
-                         session.status === 'completed' ? '완료' : session.status}
-                      </span>
                     </div>
-                  );
-                })}
+                    <span className="text-sm font-semibold text-green-600 dark:text-green-400">{monitor.uptime} uptime</span>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
         </div>
-      </div>
+      </section>
+
+      {/* Why Section */}
+      <section className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+        <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-700 p-10 shadow-sm">
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">Why checkapi.io?</h2>
+          <p className="text-gray-600 dark:text-gray-400 text-lg leading-relaxed mb-6">
+            A solo developer built this tool after getting tired of finding out about API downtime from user complaints.
+            Enterprise tools were too bloated. Free tools had too many restrictions. So this was built to do one thing well —
+            tell you when your API is broken, before anyone else finds out.
+          </p>
+          <div className="border-t border-gray-100 dark:border-gray-800 pt-6">
+            <p className="text-sm text-gray-400 dark:text-gray-500 italic">
+              Axiom Technologies is dedicated to building minimalist, mission-critical tools for the modern developer. checkapi.io is our first step toward a more reliable web.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* Features */}
+      <section id="features" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+        <div className="text-center mb-12">
+          <h2 className="text-3xl md:text-4xl font-bold text-gray-900 dark:text-white mb-4">Reliable API Uptime Checks</h2>
+          <p className="text-xl text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">Everything you need to monitor APIs and communicate status to your users.</p>
+        </div>
+        <div className="grid md:grid-cols-3 gap-8">
+          {[
+            { icon: <Zap className="h-6 w-6 text-green-600 dark:text-green-400" />, title: 'Instant Alerts', description: 'Check your APIs every minute. Get instant alerts when something goes wrong.' },
+            { icon: <Bell className="h-6 w-6 text-green-600 dark:text-green-400" />, title: 'Multi-Channel Notifications', description: 'Email, Slack, Telegram, Discord, or custom webhooks. You choose how to be notified.' },
+            { icon: <BarChart3 className="h-6 w-6 text-green-600 dark:text-green-400" />, title: '24h Response Time Graphs', description: 'Track uptime, response times, and incidents. Distinguish provider lag from your own code.' },
+            { icon: <Globe className="h-6 w-6 text-green-600 dark:text-green-400" />, title: 'Customizable Status Pages', description: 'Share a public status page with your users. No more "is it down?" support tickets.' },
+            { icon: <Shield className="h-6 w-6 text-green-600 dark:text-green-400" />, title: 'Silent Failure Detection', description: 'Catches failures even when your API returns 200 OK but something is actually broken.' },
+            { icon: <CheckCircle className="h-6 w-6 text-green-600 dark:text-green-400" />, title: 'Free for Commercial Use', description: 'Unlike UptimeRobot, no restrictions on how you use the free plan. Build your business.' },
+          ].map((feature) => (
+            <div key={feature.title} className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-6 shadow-sm hover:shadow-md transition">
+              <div className="w-10 h-10 bg-green-50 dark:bg-green-950 rounded-lg flex items-center justify-center mb-4">{feature.icon}</div>
+              <h3 className="font-semibold text-gray-900 dark:text-white mb-2">{feature.title}</h3>
+              <p className="text-gray-600 dark:text-gray-400 text-sm">{feature.description}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Pricing */}
+      <section id="pricing" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+        <div className="text-center mb-12">
+          <h2 className="text-3xl md:text-4xl font-bold text-gray-900 dark:text-white mb-4">Simple, transparent pricing</h2>
+          <p className="text-xl text-gray-600 dark:text-gray-400">Start free, upgrade when you grow</p>
+        </div>
+        <div className="grid md:grid-cols-4 gap-6">
+          {[
+            { name: 'Free', price: '$0', period: '/month', badge: null, features: ['10 monitors','5-minute checks','All alert channels','Public status page','7-day history','Commercial use allowed'], cta: 'Start Free', ctaHref: '/register', highlight: false },
+            { name: 'Starter', price: '$5', period: '/month', badge: 'POPULAR', features: ['20 monitors','1-minute checks','All alert channels','Analytics','30-day history','Commercial use allowed'], cta: 'Get Started', ctaHref: '/register', highlight: true },
+            { name: 'Pro', price: '$15', period: '/month', badge: 'Best for growing startups', features: ['100 monitors','30-second checks','Team sharing','Priority support','90-day history','Commercial use allowed'], cta: 'Get Started', ctaHref: '/register', highlight: false },
+            { name: 'Business', price: '$49', period: '/month', badge: null, features: ['Unlimited monitors','10-second checks','API access','Custom features','SLA','1-year history'], cta: 'Get Started', ctaHref: '/register', highlight: false },
+          ].map((plan) => (
+            <div key={plan.name} className={`bg-white dark:bg-gray-900 rounded-2xl border-2 p-6 ${plan.highlight ? 'border-green-500 shadow-lg' : 'border-gray-200 dark:border-gray-700'}`}>
+              {plan.badge && (
+                <span className={`inline-block text-xs font-bold px-3 py-1 rounded-full mb-3 ${plan.badge === 'POPULAR' ? 'bg-green-500 text-white' : 'bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800'}`}>
+                  {plan.badge}
+                </span>
+              )}
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-1">{plan.name}</h3>
+              <div className="mb-4">
+                <span className="text-3xl font-bold text-gray-900 dark:text-white">{plan.price}</span>
+                <span className="text-gray-500 dark:text-gray-400">{plan.period}</span>
+              </div>
+              <ul className="space-y-2 mb-6">
+                {plan.features.map((f) => (
+                  <li key={f} className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                    <CheckCircle className="h-4 w-4 text-green-500 flex-shrink-0" />{f}
+                  </li>
+                ))}
+              </ul>
+              <Link href={plan.ctaHref} className={`block text-center py-2.5 rounded-lg font-medium transition ${plan.highlight ? 'bg-green-600 text-white hover:bg-green-700' : 'border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:border-green-500 hover:text-green-600'}`}>
+                {plan.cta}
+              </Link>
+            </div>
+          ))}
+        </div>
+        <p className="text-center text-sm text-gray-500 dark:text-gray-400 mt-6">All plans include commercial use. No hidden fees. Cancel anytime.</p>
+      </section>
+
+      {/* CTA */}
+      <section className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+        <div className="bg-gradient-to-r from-green-600 to-emerald-600 rounded-2xl p-12 text-center">
+          <h2 className="text-3xl font-bold text-white mb-4">Start monitoring before your next incident</h2>
+          <p className="text-green-100 mb-8 text-lg">Takes 5 minutes to set up. You'll wonder how you managed without it.</p>
+          <Link href="/register" className="inline-flex items-center bg-white text-green-600 px-8 py-4 rounded-xl hover:bg-gray-50 transition font-semibold text-lg gap-2">
+            Protect My API for Free <ArrowRight className="h-5 w-5" />
+          </Link>
+          <p className="text-green-200 text-sm mt-4">No credit card required · 10 monitors free forever</p>
+        </div>
+      </section>
+
+      {/* Footer */}
+      <footer className="border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+          <div className="grid md:grid-cols-4 gap-8">
+            <div>
+              <h3 className="font-bold text-gray-900 dark:text-white mb-2">CheckAPI</h3>
+              <p className="text-xs text-gray-400 dark:text-gray-500 mb-2">by Axiom Technologies</p>
+              <p className="text-gray-600 dark:text-gray-400 text-sm">Simple, reliable API monitoring for developers and teams.</p>
+            </div>
+            <div>
+              <h4 className="font-semibold text-gray-900 dark:text-white mb-4">Product</h4>
+              <ul className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
+                <li><a href="#features" className="hover:text-green-600 dark:hover:text-green-400">Features</a></li>
+                <li><a href="#pricing" className="hover:text-green-600 dark:hover:text-green-400">Pricing</a></li>
+                <li><Link href="/docs" className="hover:text-green-600 dark:hover:text-green-400">Documentation</Link></li>
+              </ul>
+            </div>
+            <div>
+              <h4 className="font-semibold text-gray-900 dark:text-white mb-4">Company</h4>
+              <ul className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
+                <li><Link href="/about" className="hover:text-green-600 dark:hover:text-green-400">About</Link></li>
+                <li><Link href="/blog" className="hover:text-green-600 dark:hover:text-green-400">Blog</Link></li>
+                <li><Link href="/contact" className="hover:text-green-600 dark:hover:text-green-400">Contact</Link></li>
+              </ul>
+            </div>
+            <div>
+              <h4 className="font-semibold text-gray-900 dark:text-white mb-4">Legal</h4>
+              <ul className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
+                <li><Link href="/privacy" className="hover:text-green-600 dark:hover:text-green-400">Privacy</Link></li>
+                <li><Link href="/terms" className="hover:text-green-600 dark:hover:text-green-400">Terms</Link></li>
+              </ul>
+            </div>
+          </div>
+          <div className="border-t border-gray-200 dark:border-gray-800 mt-8 pt-8 text-center text-sm text-gray-600 dark:text-gray-400">
+            © 2026 Axiom Technologies. All rights reserved.
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }
