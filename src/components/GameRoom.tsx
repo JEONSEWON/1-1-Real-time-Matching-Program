@@ -153,11 +153,15 @@ export default function GameRoom({ nickname }: GameRoomProps) {
   }, [phase, myMatches.length, config]);
 
   const submitAnswer = useCallback(async (questionNumber: number, answerIndex: number) => {
-    if (!currentSession || lastAnswerSentRef.current[questionNumber]) return;
-    setAnswers(prev => ({ ...prev, [questionNumber]: answerIndex }));
-    lastAnswerSentRef.current[questionNumber] = true;
+    if (!currentSession) return;
+    // 같은 답 재선택 시 무시
+    setAnswers(prev => {
+      if (prev[questionNumber] === answerIndex) return prev;
+      return { ...prev, [questionNumber]: answerIndex };
+    });
     const question = questions.find(q => q.question_number === questionNumber);
     if (!question) return;
+    // upsert로 항상 최신 답변으로 덮어씀
     await supabase.from('answers').upsert({
       session_id: currentSession.id,
       question_id: question.id,
@@ -356,7 +360,6 @@ export default function GameRoom({ nickname }: GameRoomProps) {
                   question={currentQuestion}
                   selectedAnswer={answers[currentQuestionNumber] ?? null}
                   onSelect={(idx) => submitAnswer(currentQuestionNumber, idx)}
-                  onNext={handleSkipToNext}
                   questionIndex={currentQuestionIndex}
                   totalQuestions={questions.length}
                 />
