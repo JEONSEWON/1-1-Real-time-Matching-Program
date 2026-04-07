@@ -6,7 +6,8 @@ interface QuestionDisplayProps {
   question: Question;
   selectedAnswer: number | null;
   onSelect: (index: number) => void;
-  questionIndex: number; // 0-based
+  onNext?: () => void;
+  questionIndex: number;
   totalQuestions: number;
   disabled?: boolean;
 }
@@ -17,6 +18,7 @@ export default function QuestionDisplay({
   question,
   selectedAnswer,
   onSelect,
+  onNext,
   questionIndex,
   totalQuestions,
   disabled,
@@ -80,6 +82,19 @@ export default function QuestionDisplay({
           </button>
         ))}
       </div>
+
+      {/* 다음 버튼 - 답 선택했을 때만 표시 */}
+      {selectedAnswer !== null && onNext && !disabled && questionIndex < totalQuestions - 1 && (
+        <div className="mt-5 flex justify-end">
+          <button
+            onClick={onNext}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-semibold transition-all glow-accent"
+          >
+            다음 문제
+            <span className="text-base">→</span>
+          </button>
+        </div>
+      )}
     </div>
   );
 }

@@ -147,6 +147,29 @@ export default function GameRoom({ nickname }: GameRoomProps) {
     }, { onConflict: 'session_id,question_id,participant_nickname' });
   }, [currentSession, questions, nickname]);
 
+  // 다음 문제로 즉시 이동
+  const handleSkipToNext = () => {
+    if (!currentSession) return;
+    const nextQIdx = currentQuestionIndex + 1;
+    if (nextQIdx >= questions.length) return;
+    const nextElapsed = nextQIdx * 10;
+    setSessionElapsed(nextElapsed);
+    setCurrentQuestionIndex(nextQIdx);
+    if (sessionTimerRef.current) clearInterval(sessionTimerRef.current);
+    let elapsed = nextElapsed;
+    sessionTimerRef.current = setInterval(async () => {
+      elapsed += 1;
+      setSessionElapsed(elapsed);
+      const qIdx = Math.min(Math.floor(elapsed / 10), questions.length - 1);
+      setCurrentQuestionIndex(qIdx);
+      if (elapsed >= questions.length * 10) {
+        clearInterval(sessionTimerRef.current!);
+        setPhase('result');
+        await handleSessionEnd(currentSession);
+      }
+    }, 1000);
+  };
+
   const setupRealtimeSubscriptions = () => {
     const configChannel = supabase.channel('game_config_changes')
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'game_config' },
@@ -306,6 +329,7 @@ export default function GameRoom({ nickname }: GameRoomProps) {
                   question={currentQuestion}
                   selectedAnswer={answers[currentQuestionNumber] ?? null}
                   onSelect={(idx) => submitAnswer(currentQuestionNumber, idx)}
+                  onNext={handleSkipToNext}
                   questionIndex={currentQuestionIndex}
                   totalQuestions={questions.length}
                 />
