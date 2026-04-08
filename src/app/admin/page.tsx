@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { GameConfig, GameSession, Participant, Question } from '@/lib/types';
 
@@ -10,6 +10,11 @@ interface DraftQuestion {
   question_number: number;
   question_text: string;
   options: string[];
+}
+
+interface DraftSession {
+  sessionNumber: number;
+  questions: DraftQuestion[];
 }
 
 export default function AdminPage() {
@@ -24,11 +29,16 @@ export default function AdminPage() {
   const [message, setMessage] = useState('');
   const [editStartTime, setEditStartTime] = useState('');
 
-  // 문제 생성 → 검토 → 시작 플로우
-  const [step, setStep] = useState<'idle' | 'generating' | 'review' | 'launching'>('idle');
-  const [pendingSessionNumber, setPendingSessionNumber] = useState<number | null>(null);
-  const [draftQuestions, setDraftQuestions] = useState<DraftQuestion[]>([]);
-  const [editingIdx, setEditingIdx] = useState<number | null>(null);
+  // 전체 문제 생성 플로우
+  const [genStep, setGenStep] = useState<'idle' | 'generating' | 'review'>('idle');
+  const [genProgress, setGenProgress] = useState(0); // 생성 진행 세션 수
+  const [draftSessions, setDraftSessions] = useState<DraftSession[]>([]);
+  const [reviewSessionIdx, setReviewSessionIdx] = useState(0); // 현재 검토 중인 세션 인덱스
+  const [editingQIdx, setEditingQIdx] = useState<number | null>(null);
+  const [launching, setLaunching] = useState(false);
+
+  // 예약 시작 자동 감지
+  const scheduleCheckRef = useRef<NodeJS.Timeout | null>(null);
 
   // 기존 세션 문제 보기
   const [selectedSession, setSelectedSession] = useState<string | null>(null);
@@ -41,6 +51,30 @@ export default function AdminPage() {
     const interval = setInterval(loadAdminData, 5000);
     return () => clearInterval(interval);
   }, [authed]);
+
+  // 예약 시간 자동 시작 감지
+  useEffect(() => {
+    if (!authed || !config?.session_start_time) return;
+    if (scheduleCheckRef.current) clearInterval(scheduleCheckRef.current);
+
+    scheduleCheckRef.current = setInterval(async () => {
+      const now = new Date();
+      const startTime = new Date(config.session_start_time!);
+      const diff = now.getTime() - startTime.getTime();
+      // 시작 시간이 됐고 (0~30초 이내), 아직 세션 시작 안 됐고, 문제가 준비된 경우
+      if (diff >= 0 && diff < 30000 && !config.is_active && draftSessions.length > 0) {
+        const nextNum = (config.current_session_number ?? 0) + 1;
+        const draft = draftSessions.find(d => d.sessionNumber === nextNum);
+        if (draft) {
+          await launchSession(draft);
+        }
+      }
+    }, 3000);
+
+    return () => {
+      if (scheduleCheckRef.current) clearInterval(scheduleCheckRef.current);
+    };
+  }, [authed, config?.session_start_time, config?.is_active, draftSessions]);
 
   const loadAdminData = async () => {
     const [configRes, sessionsRes, participantsRes] = await Promise.all([
@@ -63,46 +97,51 @@ export default function AdminPage() {
     setTimeout(() => setMessage(''), 4000);
   };
 
-  // 1단계: 문제 생성만 (세션 아직 시작 안 함)
-  const generateQuestions = async (sessionNumber: number) => {
-    setStep('generating');
-    setPendingSessionNumber(sessionNumber);
+  // 전체 세션 문제 일괄 생성
+  const generateAllQuestions = async () => {
+    setGenStep('generating');
+    setGenProgress(0);
+    const totalSessions = config?.total_sessions ?? 10;
+    const allDrafts: DraftSession[] = [];
+
     try {
-      const res = await fetch('/api/admin/generate-questions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionNumber, count: 20 }),
-      });
-      if (!res.ok) throw new Error('Failed');
-      const { questions } = await res.json();
-      setDraftQuestions(questions);
-      setStep('review');
-    } catch (e) {
-      showMsg('❌ 문제 생성 실패');
-      setStep('idle');
+      for (let i = 1; i <= totalSessions; i++) {
+        setGenProgress(i);
+        const res = await fetch('/api/admin/generate-questions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionNumber: i, count: 20 }),
+        });
+        if (!res.ok) throw new Error(`세션 ${i} 생성 실패`);
+        const { questions } = await res.json();
+        allDrafts.push({ sessionNumber: i, questions });
+      }
+      setDraftSessions(allDrafts);
+      setReviewSessionIdx(0);
+      setGenStep('review');
+      showMsg('✅ 전체 문제 생성 완료! 검토 후 세션별로 시작하세요.');
+    } catch (e: any) {
+      showMsg(`❌ ${e.message}`);
+      setGenStep('idle');
     }
   };
 
-  // 2단계: 검토 완료 후 실제 세션 시작
-  const launchSession = async () => {
-    if (!pendingSessionNumber) return;
-    setStep('launching');
+  // 특정 세션 시작
+  const launchSession = async (draft: DraftSession) => {
+    setLaunching(true);
     try {
       const res = await fetch('/api/admin/launch-session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionNumber: pendingSessionNumber, questions: draftQuestions }),
+        body: JSON.stringify({ sessionNumber: draft.sessionNumber, questions: draft.questions }),
       });
       if (!res.ok) throw new Error('Failed');
-      showMsg(`✅ 세션 ${pendingSessionNumber} 시작!`);
-      setStep('idle');
-      setDraftQuestions([]);
-      setPendingSessionNumber(null);
-      setEditingIdx(null);
+      showMsg(`✅ 세션 ${draft.sessionNumber} 시작!`);
       await loadAdminData();
     } catch (e) {
       showMsg('❌ 세션 시작 실패');
-      setStep('idle');
+    } finally {
+      setLaunching(false);
     }
   };
 
@@ -113,7 +152,7 @@ export default function AdminPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ session_start_time: new Date(editStartTime).toISOString() }),
     });
-    if (res.ok) showMsg('✅ 시작 시간 저장');
+    if (res.ok) showMsg('✅ 시작 시간 저장 — 해당 시간에 자동으로 세션이 시작됩니다.');
   };
 
   const resetGame = async () => {
@@ -128,8 +167,8 @@ export default function AdminPage() {
     await supabase.from('game_config').update({
       is_active: false, current_session_number: 0, updated_at: new Date().toISOString(),
     }).eq('id', 1);
-    setStep('idle');
-    setDraftQuestions([]);
+    setGenStep('idle');
+    setDraftSessions([]);
     showMsg('✅ 초기화 완료');
     setLoading(false);
     await loadAdminData();
@@ -158,26 +197,26 @@ export default function AdminPage() {
       <div className="min-h-screen flex items-center justify-center bg-bg p-4">
         <div className="w-full max-w-sm bg-surface border border-border rounded-2xl p-8">
           <h1 className="font-display font-bold text-2xl text-white mb-6 text-center">관리자 로그인</h1>
-          <input
-            type="password" value={pw}
+          <input type="password" value={pw}
             onChange={(e) => { setPw(e.target.value); setPwError(''); }}
             onKeyDown={(e) => { if (e.key === 'Enter') { if (pw === ADMIN_PASSWORD) setAuthed(true); else setPwError('비밀번호가 틀렸습니다'); } }}
             placeholder="비밀번호 입력"
             className="w-full px-4 py-3 rounded-xl bg-bg border border-border text-white placeholder-slate-600 focus:outline-none focus:border-violet-500 mb-2"
           />
           {pwError && <p className="text-red-400 text-sm mb-2">{pwError}</p>}
-          <button
-            onClick={() => { if (pw === ADMIN_PASSWORD) setAuthed(true); else setPwError('비밀번호가 틀렸습니다'); }}
-            className="w-full py-3 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-semibold"
-          >로그인</button>
+          <button onClick={() => { if (pw === ADMIN_PASSWORD) setAuthed(true); else setPwError('비밀번호가 틀렸습니다'); }}
+            className="w-full py-3 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-semibold">
+            로그인
+          </button>
         </div>
       </div>
     );
   }
 
   const nextSessionNumber = (config?.current_session_number ?? 0) + 1;
-  const canStartNext = nextSessionNumber <= (config?.total_sessions ?? 10);
   const activeSession = sessions.find(s => s.status === 'active');
+  const currentDraft = draftSessions[reviewSessionIdx];
+  const nextDraft = draftSessions.find(d => d.sessionNumber === nextSessionNumber);
 
   return (
     <div className="min-h-screen bg-bg text-white p-6">
@@ -191,7 +230,7 @@ export default function AdminPage() {
           </div>
           <div className="flex items-center gap-3">
             {message && (
-              <div className="bg-neon/10 border border-neon/30 text-neon px-4 py-2 rounded-xl text-sm font-medium">
+              <div className="bg-neon/10 border border-neon/30 text-neon px-4 py-2 rounded-xl text-sm font-medium max-w-xs">
                 {message}
               </div>
             )}
@@ -202,119 +241,137 @@ export default function AdminPage() {
           </div>
         </div>
 
-        {/* 문제 검토 패널 (step === 'review') */}
-        {step === 'review' && (
-          <div className="mb-6 bg-surface border border-violet-700/50 rounded-xl p-6">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h2 className="font-display font-bold text-xl text-white">
-                  세션 {pendingSessionNumber} 문제 검토
-                </h2>
-                <p className="text-slate-400 text-sm mt-1">문제를 확인하고 수정한 뒤 세션을 시작하세요.</p>
-              </div>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => { setStep('idle'); setDraftQuestions([]); setPendingSessionNumber(null); }}
-                  className="px-4 py-2 rounded-lg border border-border text-slate-400 hover:text-white text-sm transition-colors"
-                >
-                  취소
-                </button>
-                <button
-                  onClick={launchSession}
-                  className="px-6 py-2 rounded-lg bg-neon/20 border border-neon/50 text-neon hover:bg-neon/30 font-semibold text-sm transition-colors"
-                >
-                  ▶ 세션 시작
-                </button>
-              </div>
+        {/* 생성 중 */}
+        {genStep === 'generating' && (
+          <div className="mb-6 bg-surface border border-border rounded-xl p-8">
+            <div className="flex items-center gap-4 mb-4">
+              <div className="w-5 h-5 border-2 border-violet-500 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+              <p className="text-slate-300 font-medium">전체 문제 생성 중... ({genProgress}/{config?.total_sessions ?? 10} 세션)</p>
             </div>
-
-            <div className="space-y-2 max-h-[500px] overflow-y-auto">
-              {draftQuestions.map((q, idx) => (
-                <div key={idx} className="border border-border rounded-lg overflow-hidden">
-                  {editingIdx === idx ? (
-                    <div className="p-4 bg-bg space-y-3">
-                      <div>
-                        <label className="text-xs text-slate-400 mb-1 block">문제 내용</label>
-                        <textarea
-                          value={q.question_text}
-                          onChange={(e) => {
-                            const next = [...draftQuestions];
-                            next[idx] = { ...next[idx], question_text: e.target.value };
-                            setDraftQuestions(next);
-                          }}
-                          rows={2}
-                          className="w-full px-3 py-2 rounded-lg bg-surface border border-border text-white text-sm resize-none focus:outline-none focus:border-violet-500"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs text-slate-400 mb-1 block">선택지</label>
-                        {q.options.map((opt, oi) => (
-                          <div key={oi} className="flex gap-2 mb-1.5">
-                            <span className="text-xs text-slate-600 w-4 pt-2 flex-shrink-0">{oi + 1}</span>
-                            <input
-                              value={opt}
-                              onChange={(e) => {
-                                const next = [...draftQuestions];
-                                const opts = [...next[idx].options];
-                                opts[oi] = e.target.value;
-                                next[idx] = { ...next[idx], options: opts };
-                                setDraftQuestions(next);
-                              }}
-                              className="flex-1 px-3 py-1.5 rounded-lg bg-surface border border-border text-white text-sm focus:outline-none focus:border-violet-500"
-                            />
-                            {q.options.length > 2 && (
-                              <button onClick={() => {
-                                const next = [...draftQuestions];
-                                next[idx].options = next[idx].options.filter((_, j) => j !== oi);
-                                setDraftQuestions(next);
-                              }} className="text-red-500 hover:text-red-400 px-1 text-sm">×</button>
-                            )}
-                          </div>
-                        ))}
-                        {q.options.length < 4 && (
-                          <button onClick={() => {
-                            const next = [...draftQuestions];
-                            next[idx].options = [...next[idx].options, ''];
-                            setDraftQuestions(next);
-                          }} className="text-xs text-slate-500 hover:text-slate-300 mt-1">+ 선택지 추가</button>
-                        )}
-                      </div>
-                      <button onClick={() => setEditingIdx(null)}
-                        className="px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium">
-                        완료
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="flex items-start gap-3 p-3 hover:bg-bg/50 group transition-colors">
-                      <span className="font-mono text-xs text-slate-600 w-6 flex-shrink-0 pt-0.5">Q{q.question_number}</span>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm text-white">{q.question_text}</p>
-                        <p className="text-xs text-slate-600 mt-1">
-                          {q.options.map((o, i) => `${i + 1}.${o}`).join(' · ')}
-                        </p>
-                      </div>
-                      <button onClick={() => setEditingIdx(idx)}
-                        className="text-xs text-slate-600 hover:text-accent-light opacity-0 group-hover:opacity-100 transition-all flex-shrink-0 px-2">
-                        수정
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ))}
+            <div className="w-full h-2 bg-border rounded-full overflow-hidden">
+              <div className="h-full bg-violet-500 rounded-full transition-all duration-500"
+                style={{ width: `${(genProgress / (config?.total_sessions ?? 10)) * 100}%` }} />
             </div>
+            <p className="text-xs text-slate-600 mt-2">세션당 10~20초 소요 · 총 {(config?.total_sessions ?? 10) * 15}초 내외</p>
           </div>
         )}
 
-        {/* 문제 생성 중 */}
-        {step === 'generating' && (
-          <div className="mb-6 bg-surface border border-border rounded-xl p-8 flex items-center justify-center gap-4">
-            <div className="w-5 h-5 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
-            <p className="text-slate-300">세션 {pendingSessionNumber} 문제 생성 중... (10~20초)</p>
+        {/* 문제 검토 패널 */}
+        {genStep === 'review' && draftSessions.length > 0 && (
+          <div className="mb-6 bg-surface border border-violet-700/40 rounded-xl p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="font-display font-bold text-xl text-white">문제 검토 및 수정</h2>
+                <p className="text-slate-400 text-sm mt-1">총 {draftSessions.length}개 세션 생성 완료 — 수정 후 각 세션을 시작하세요.</p>
+              </div>
+            </div>
+
+            {/* 세션 탭 */}
+            <div className="flex gap-2 mb-4 flex-wrap">
+              {draftSessions.map((d, idx) => {
+                const launched = sessions.find(s => s.session_number === d.sessionNumber);
+                return (
+                  <button key={d.sessionNumber}
+                    onClick={() => { setReviewSessionIdx(idx); setEditingQIdx(null); }}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                      reviewSessionIdx === idx
+                        ? 'bg-violet-600 text-white'
+                        : launched
+                        ? 'bg-neon/10 text-neon border border-neon/30'
+                        : 'bg-border text-slate-400 hover:text-white'
+                    }`}>
+                    S{d.sessionNumber} {launched ? '✓' : ''}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* 현재 세션 문제 */}
+            {currentDraft && (
+              <>
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-sm font-semibold text-white">세션 {currentDraft.sessionNumber} ({currentDraft.questions.length}문제)</p>
+                  {!sessions.find(s => s.session_number === currentDraft.sessionNumber) && !activeSession && (
+                    <button
+                      onClick={() => launchSession(currentDraft)}
+                      disabled={launching}
+                      className="px-4 py-2 rounded-lg bg-neon/20 border border-neon/40 text-neon hover:bg-neon/30 text-sm font-semibold transition-colors disabled:opacity-40"
+                    >
+                      {launching ? '시작 중...' : `▶ 세션 ${currentDraft.sessionNumber} 시작`}
+                    </button>
+                  )}
+                  {sessions.find(s => s.session_number === currentDraft.sessionNumber) && (
+                    <span className="text-xs text-neon bg-neon/10 px-3 py-1 rounded-full">이미 시작됨</span>
+                  )}
+                  {activeSession && !sessions.find(s => s.session_number === currentDraft.sessionNumber) && (
+                    <span className="text-xs text-slate-500 bg-border px-3 py-1 rounded-full">세션 {activeSession.session_number} 종료 후 시작 가능</span>
+                  )}
+                </div>
+
+                <div className="space-y-1.5 max-h-96 overflow-y-auto">
+                  {currentDraft.questions.map((q, idx) => (
+                    <div key={idx} className="border border-border rounded-lg overflow-hidden">
+                      {editingQIdx === idx ? (
+                        <div className="p-3 bg-bg space-y-2">
+                          <textarea value={q.question_text}
+                            onChange={(e) => {
+                              const next = [...draftSessions];
+                              next[reviewSessionIdx].questions[idx].question_text = e.target.value;
+                              setDraftSessions(next);
+                            }}
+                            rows={2}
+                            className="w-full px-3 py-2 rounded-lg bg-surface border border-border text-white text-sm resize-none focus:outline-none focus:border-violet-500"
+                          />
+                          {q.options.map((opt, oi) => (
+                            <div key={oi} className="flex gap-2">
+                              <span className="text-xs text-slate-600 w-4 pt-2 flex-shrink-0">{oi+1}</span>
+                              <input value={opt}
+                                onChange={(e) => {
+                                  const next = [...draftSessions];
+                                  next[reviewSessionIdx].questions[idx].options[oi] = e.target.value;
+                                  setDraftSessions(next);
+                                }}
+                                className="flex-1 px-3 py-1.5 rounded-lg bg-surface border border-border text-white text-sm focus:outline-none focus:border-violet-500"
+                              />
+                              {q.options.length > 2 && (
+                                <button onClick={() => {
+                                  const next = [...draftSessions];
+                                  next[reviewSessionIdx].questions[idx].options.splice(oi, 1);
+                                  setDraftSessions([...next]);
+                                }} className="text-red-500 text-sm px-1">×</button>
+                              )}
+                            </div>
+                          ))}
+                          {q.options.length < 4 && (
+                            <button onClick={() => {
+                              const next = [...draftSessions];
+                              next[reviewSessionIdx].questions[idx].options.push('');
+                              setDraftSessions([...next]);
+                            }} className="text-xs text-slate-500 hover:text-slate-300">+ 선택지 추가</button>
+                          )}
+                          <button onClick={() => setEditingQIdx(null)}
+                            className="px-3 py-1.5 rounded-lg bg-violet-600 text-white text-xs font-medium">완료</button>
+                        </div>
+                      ) : (
+                        <div className="flex items-start gap-3 p-2.5 hover:bg-bg/50 group transition-colors cursor-pointer"
+                          onClick={() => setEditingQIdx(idx)}>
+                          <span className="font-mono text-xs text-slate-600 w-6 flex-shrink-0 pt-0.5">Q{q.question_number}</span>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm text-white">{q.question_text}</p>
+                            <p className="text-xs text-slate-600 mt-0.5">{q.options.join(' · ')}</p>
+                          </div>
+                          <span className="text-xs text-slate-600 opacity-0 group-hover:opacity-100 flex-shrink-0">수정</span>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* 좌측: 게임 컨트롤 */}
           <div className="lg:col-span-2 space-y-6">
 
             {/* 상태 */}
@@ -340,49 +397,62 @@ export default function AdminPage() {
               </div>
             </div>
 
-            {/* 세션 시작 */}
+            {/* 문제 생성 */}
             <div className="bg-surface border border-border rounded-xl p-5">
-              <h2 className="font-semibold text-slate-200 mb-1">세션 시작</h2>
+              <h2 className="font-semibold text-slate-200 mb-1">전체 문제 생성</h2>
               <p className="text-xs text-slate-500 mb-4">
-                [문제 생성] → 내용 검토 및 수정 → [세션 시작] 순서로 진행됩니다.
+                전체 {config?.total_sessions ?? 10}개 세션 문제를 한번에 생성합니다.
+                생성 후 검토·수정하고 세션별로 시작하세요.
               </p>
-
-              {canStartNext && !activeSession ? (
-                <button
-                  onClick={() => generateQuestions(nextSessionNumber)}
-                  disabled={step !== 'idle'}
-                  className="w-full py-4 rounded-xl bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-lg transition-all"
-                >
-                  {step === 'generating'
-                    ? '문제 생성 중...'
-                    : `세션 ${nextSessionNumber} 문제 생성`}
+              {genStep === 'idle' ? (
+                <button onClick={generateAllQuestions}
+                  className="w-full py-4 rounded-xl bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 text-white font-bold text-lg transition-all">
+                  전체 문제 생성 ({config?.total_sessions ?? 10}세션)
                 </button>
-              ) : activeSession ? (
-                <div className="w-full py-4 rounded-xl bg-neon/10 border border-neon/30 text-neon text-center font-semibold">
-                  세션 {activeSession.session_number} 진행 중
+              ) : genStep === 'generating' ? (
+                <div className="w-full py-4 rounded-xl bg-violet-900/30 border border-violet-700/40 text-violet-400 text-center font-semibold">
+                  생성 중... ({genProgress}/{config?.total_sessions ?? 10})
                 </div>
               ) : (
-                <div className="w-full py-4 rounded-xl bg-surface border border-border text-slate-500 text-center">
-                  모든 세션 완료
+                <div className="flex gap-3">
+                  <div className="flex-1 py-3 rounded-xl bg-neon/10 border border-neon/30 text-neon text-center text-sm font-semibold">
+                    ✅ {draftSessions.length}개 세션 준비 완료
+                  </div>
+                  <button onClick={generateAllQuestions}
+                    className="px-4 py-3 rounded-xl border border-border text-slate-400 hover:text-white text-sm transition-colors">
+                    재생성
+                  </button>
                 </div>
+              )}
+
+              {/* 다음 세션 빠른 시작 버튼 */}
+              {nextDraft && !activeSession && genStep === 'review' && (
+                <button
+                  onClick={() => launchSession(nextDraft)}
+                  disabled={launching}
+                  className="w-full mt-3 py-3 rounded-xl bg-neon/20 border border-neon/40 text-neon hover:bg-neon/30 font-semibold text-sm transition-colors disabled:opacity-40"
+                >
+                  {launching ? '시작 중...' : `▶ 세션 ${nextSessionNumber} 바로 시작`}
+                </button>
               )}
             </div>
 
-            {/* 시작 시간 설정 */}
+            {/* 예약 시작 시간 */}
             <div className="bg-surface border border-border rounded-xl p-5">
-              <h2 className="font-semibold text-slate-200 mb-3">예약 시작 시간</h2>
+              <h2 className="font-semibold text-slate-200 mb-1">예약 시작 시간</h2>
+              <p className="text-xs text-slate-500 mb-3">
+                설정된 시간에 자동으로 다음 세션이 시작됩니다. (문제가 미리 생성되어 있어야 합니다)
+              </p>
               <div className="flex gap-2">
-                <input
-                  type="datetime-local" value={editStartTime}
+                <input type="datetime-local" value={editStartTime}
                   onChange={(e) => setEditStartTime(e.target.value)}
                   className="flex-1 px-3 py-2 rounded-lg bg-bg border border-border text-white text-sm focus:outline-none focus:border-violet-500"
                 />
                 <button onClick={updateStartTime}
-                  className="px-4 py-2 rounded-lg bg-violet-600/80 hover:bg-violet-600 text-white text-sm font-medium transition-colors">
+                  className="px-4 py-2 rounded-lg bg-violet-600/80 hover:bg-violet-600 text-white text-sm font-medium">
                   저장
                 </button>
               </div>
-              <p className="text-xs text-slate-600 mt-2">참가자 대기 화면에 예정 시간이 표시됩니다.</p>
             </div>
 
             {/* 세션 목록 */}
@@ -411,9 +481,7 @@ export default function AdminPage() {
                            session?.status === 'completed' ? '완료' : '대기'}
                         </span>
                       </div>
-                      {session && (
-                        <span className="text-xs text-slate-600">문제 보기 →</span>
-                      )}
+                      {session && <span className="text-xs text-slate-600">문제 보기 →</span>}
                     </div>
                   );
                 })}
@@ -421,9 +489,8 @@ export default function AdminPage() {
             </div>
           </div>
 
-          {/* 우측: 참가자 + 문제 상세 */}
+          {/* 우측: 참가자 + 기존 문제 상세 */}
           <div className="space-y-6">
-            {/* 참가자 */}
             <div className="bg-surface border border-border rounded-xl p-4">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="font-semibold text-slate-200 text-sm">접속 중인 참가자</h3>
@@ -434,7 +501,7 @@ export default function AdminPage() {
                   <p className="text-slate-600 text-xs text-center py-4">접속자 없음</p>
                 ) : (
                   [...participants].sort((a, b) => a.nickname.localeCompare(b.nickname, 'ko')).map(p => (
-                    <div key={p.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg">
+                    <div key={p.id} className="flex items-center gap-2 px-2 py-1.5">
                       <div className="w-1.5 h-1.5 rounded-full bg-neon flex-shrink-0" />
                       <span className="text-sm text-slate-300 truncate">{p.nickname}</span>
                     </div>
@@ -443,17 +510,14 @@ export default function AdminPage() {
               </div>
             </div>
 
-            {/* 선택된 세션 문제 목록 */}
             {selectedSession && (
               <div className="bg-surface border border-border rounded-xl p-4">
                 <h3 className="font-semibold text-slate-200 text-sm mb-3">
                   문제 목록 <span className="text-slate-500 font-normal">({sessionQuestions.length}개)</span>
                 </h3>
-
                 {editingQuestion ? (
                   <div className="space-y-2">
-                    <textarea
-                      value={editingQuestion.question_text}
+                    <textarea value={editingQuestion.question_text}
                       onChange={(e) => setEditingQuestion({ ...editingQuestion, question_text: e.target.value })}
                       rows={2}
                       className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-white text-xs resize-none focus:outline-none focus:border-violet-500"
@@ -470,7 +534,7 @@ export default function AdminPage() {
                     ))}
                     <div className="flex gap-2">
                       <button onClick={saveQuestionEdit}
-                        className="px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium">저장</button>
+                        className="px-3 py-1.5 rounded-lg bg-violet-600 text-white text-xs font-medium">저장</button>
                       <button onClick={() => setEditingQuestion(null)}
                         className="px-3 py-1.5 rounded-lg border border-border text-slate-400 text-xs">취소</button>
                     </div>
@@ -479,15 +543,12 @@ export default function AdminPage() {
                   <div className="space-y-1 max-h-96 overflow-y-auto">
                     {sessionQuestions.map(q => (
                       <div key={q.id}
-                        className="flex items-start gap-2 p-2 rounded-lg border border-border hover:border-violet-700/50 group transition-colors cursor-pointer"
-                        onClick={() => setEditingQuestion(q)}
-                      >
+                        className="flex items-start gap-2 p-2 rounded-lg border border-border hover:border-violet-700/50 group cursor-pointer"
+                        onClick={() => setEditingQuestion(q)}>
                         <span className="font-mono text-xs text-slate-600 flex-shrink-0 pt-0.5">Q{q.question_number}</span>
                         <div className="flex-1 min-w-0">
                           <p className="text-xs text-white line-clamp-2">{q.question_text}</p>
-                          <p className="text-xs text-slate-600 mt-0.5 truncate">
-                            {q.options.join(' / ')}
-                          </p>
+                          <p className="text-xs text-slate-600 mt-0.5 truncate">{q.options.join(' / ')}</p>
                         </div>
                         <span className="text-xs text-slate-600 opacity-0 group-hover:opacity-100 flex-shrink-0">수정</span>
                       </div>

@@ -138,8 +138,11 @@ export default function GameRoom({ nickname }: GameRoomProps) {
   // 매칭 없을 때 자동으로 다음 세션 대기로 이동
   useEffect(() => {
     const _isLast = (config?.current_session_number ?? 0) >= (config?.total_sessions ?? 10);
-    if (phase !== 'result' || myMatches.length > 0 || _isLast) return;
-    let secs = 5;
+    if (phase !== 'result' || _isLast) return;
+    // 매칭 여부 상관없이 결과 화면에서 자동 대기로 이동
+    // 매칭 없으면 5초, 매칭 있으면 30초 후 이동
+    const delay = myMatches.length > 0 ? 30 : 5;
+    let secs = delay;
     setNoMatchCountdown(secs);
     const interval = setInterval(() => {
       secs -= 1;
@@ -415,7 +418,12 @@ export default function GameRoom({ nickname }: GameRoomProps) {
                 )}
 
                 {!isLastSession && (
-                  <p className="mt-8 text-center text-sm text-slate-500">다음 세션이 시작되면 자동으로 이동됩니다</p>
+                  <div className="mt-6 text-center">
+                    <p className="text-sm text-slate-500 mb-1">
+                      {myMatches.length > 0 ? '채팅 후 다음 세션 대기로 이동합니다' : '다음 세션 대기로 이동합니다'}
+                    </p>
+                    <p className="font-mono font-bold text-2xl text-accent-light">{noMatchCountdown}초</p>
+                  </div>
                 )}
                 {isLastSession && (
                   <div className="mt-8 text-center bg-surface border border-border rounded-xl p-6">

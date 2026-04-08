@@ -112,8 +112,8 @@ export default function ChatModal({ match, myNickname, onClose }: ChatModalProps
       {showCommon && match.common_answers.length > 0 && (
         <div className="px-4 py-3 border-b border-border bg-bg/50 flex-shrink-0">
           <p className="text-xs text-slate-500 mb-2 font-medium">같은 답을 선택한 문항</p>
-          <div className="space-y-1.5 max-h-28 overflow-y-auto">
-            {match.common_answers.slice(0, 5).map((ca: CommonAnswer, i: number) => (
+          <div className="space-y-1.5 max-h-48 overflow-y-auto">
+            {match.common_answers.map((ca: CommonAnswer, i: number) => (
               <div key={i} className="flex items-start gap-2">
                 <span className="text-xs font-mono text-slate-600 flex-shrink-0 mt-0.5">
                   Q{ca.question_number}
@@ -124,9 +124,7 @@ export default function ChatModal({ match, myNickname, onClose }: ChatModalProps
                 </div>
               </div>
             ))}
-            {match.common_answers.length > 5 && (
-              <p className="text-xs text-slate-600">외 {match.common_answers.length - 5}개 더...</p>
-            )}
+
           </div>
         </div>
       )}
