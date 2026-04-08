@@ -85,7 +85,11 @@ export default function AdminPage() {
     if (configRes.data) {
       setConfig(configRes.data);
       if (configRes.data.session_start_time) {
-        setEditStartTime(new Date(configRes.data.session_start_time).toISOString().slice(0, 16));
+        // UTC → 로컬 시간으로 변환해서 input에 표시
+        const d = new Date(configRes.data.session_start_time);
+        const offset = d.getTimezoneOffset() * 60000;
+        const localISO = new Date(d.getTime() - offset).toISOString().slice(0, 16);
+        setEditStartTime(localISO);
       }
     }
     if (sessionsRes.data) setSessions(sessionsRes.data);
