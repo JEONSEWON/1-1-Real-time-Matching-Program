@@ -29,6 +29,9 @@ export default function GameRoom({ nickname }: GameRoomProps) {
   const [countdownNum, setCountdownNum] = useState<number | null>(null);
   const [noMatchMessage, setNoMatchMessage] = useState('');
   const [noMatchCountdown, setNoMatchCountdown] = useState(5);
+  const [allMatches, setAllMatches] = useState<Match[]>([]); // 전체 세션 누적 매칭
+  const [chatPanelOpen, setChatPanelOpen] = useState(false); // 채팅 패널 토글
+  const [activeChatMatchId, setActiveChatMatchId] = useState<string | null>(null);
 
   const sessionTimerRef = useRef<NodeJS.Timeout | null>(null);
   const lastAnswerSentRef = useRef<Record<number, boolean>>({});
@@ -124,6 +127,14 @@ export default function GameRoom({ nickname }: GameRoomProps) {
       .eq('session_id', sessionId);
     if (data && data.length > 0) {
       setMyMatches(data);
+      // 전체 매칭 누적 (중복 제거)
+      setAllMatches(prev => {
+        const existingIds = new Set(prev.map(m => m.id));
+        const newOnes = data.filter((m: Match) => !existingIds.has(m.id));
+        return [...prev, ...newOnes];
+      });
+      setChatPanelOpen(true);
+      setActiveChatMatchId(data[0].id);
     } else {
       const cfg = await supabase.from('game_config').select('total_sessions').eq('id', 1).single();
       const isLast = sessionNumber >= (cfg.data?.total_sessions ?? 10);
@@ -436,7 +447,51 @@ export default function GameRoom({ nickname }: GameRoomProps) {
           )}
         </main>
 
-        <aside className="w-56 border-l border-border p-4 flex-shrink-0 bg-surface/30">
+        {/* 채팅 패널 (매칭 있을 때 오버레이) */}
+        {chatPanelOpen && allMatches.length > 0 && (
+          <div className="w-80 border-l border-border flex flex-col flex-shrink-0 bg-surface">
+            {/* 패널 헤더 */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
+              <span className="text-sm font-semibold text-white">매칭 채팅</span>
+              <button onClick={() => setChatPanelOpen(false)}
+                className="text-slate-500 hover:text-white text-xl leading-none">×</button>
+            </div>
+            {/* 매칭 탭 */}
+            {allMatches.length > 1 && (
+              <div className="flex gap-1 px-3 py-2 border-b border-border overflow-x-auto flex-shrink-0">
+                {allMatches.map(m => {
+                  const other = m.participant_a === nickname ? m.participant_b : m.participant_a;
+                  return (
+                    <button key={m.id}
+                      onClick={() => setActiveChatMatchId(m.id)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
+                        activeChatMatchId === m.id
+                          ? 'bg-violet-600 text-white'
+                          : 'bg-border text-slate-400 hover:text-white'
+                      }`}>
+                      {other}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {/* 활성 채팅 */}
+            <div className="flex-1 min-h-0">
+              {allMatches.filter(m => m.id === activeChatMatchId).map(m => (
+                <ChatModal key={m.id} match={m} myNickname={nickname} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        <aside className="w-56 border-l border-border p-4 flex-shrink-0 bg-surface/30 flex flex-col gap-4">
+          {/* 채팅 열기 버튼 */}
+          {allMatches.length > 0 && !chatPanelOpen && (
+            <button onClick={() => setChatPanelOpen(true)}
+              className="w-full py-2 rounded-xl bg-violet-600/20 border border-violet-500/40 text-accent-light text-sm font-semibold hover:bg-violet-600/30 transition-colors">
+              💬 채팅 열기 ({allMatches.length})
+            </button>
+          )}
           <ParticipantsList participants={participants} myNickname={nickname} />
         </aside>
       </div>
