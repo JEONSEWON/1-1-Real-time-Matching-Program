@@ -34,7 +34,6 @@ export default function GameRoom({ nickname }: GameRoomProps) {
   const [activeChatMatchId, setActiveChatMatchId] = useState<string | null>(null);
 
   const sessionTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const lastAnswerSentRef = useRef<Record<number, boolean>>({});
 
   useEffect(() => {
     loadInitialData();
@@ -222,7 +221,6 @@ export default function GameRoom({ nickname }: GameRoomProps) {
               if (!session) return;
               setCurrentSession(session);
               setAnswers({});
-              lastAnswerSentRef.current = {};
               setMyMatches([]);
               setNoMatchMessage('');
               const { data: qs } = await supabase.from('questions').select('*')
@@ -254,6 +252,10 @@ export default function GameRoom({ nickname }: GameRoomProps) {
           const match = payload.new as Match;
           if (match.participant_a === nickname || match.participant_b === nickname) {
             setMyMatches(prev => prev.find(m => m.id === match.id) ? prev : [...prev, match]);
+            // allMatches에도 누적
+            setAllMatches(prev => prev.find(m => m.id === match.id) ? prev : [...prev, match]);
+            setChatPanelOpen(true);
+            setActiveChatMatchId(match.id);
           }
         }
       ).subscribe();
@@ -416,15 +418,12 @@ export default function GameRoom({ nickname }: GameRoomProps) {
                 )}
 
                 {myMatches.length > 0 && (
-                  <div className={`grid gap-4 ${
-                    myMatches.length === 1 ? 'grid-cols-1 max-w-xl mx-auto' :
-                    myMatches.length === 2 ? 'grid-cols-2' : 'grid-cols-2 xl:grid-cols-3'
-                  }`}>
-                    {myMatches.map((match, i) => (
-                      <div key={match.id} className="match-card h-[500px]" style={{ animationDelay: `${i * 0.1}s` }}>
-                        <ChatModal match={match} myNickname={nickname} />
-                      </div>
-                    ))}
+                  <div className="flex flex-col items-center justify-center py-8">
+                    <div className="text-5xl mb-4">🎉</div>
+                    <p className="text-slate-300 text-sm text-center">
+                      오른쪽 채팅 패널에서 대화를 이어가세요!<br/>
+                      채팅은 다음 세션이 시작되어도 계속 유지됩니다.
+                    </p>
                   </div>
                 )}
 
