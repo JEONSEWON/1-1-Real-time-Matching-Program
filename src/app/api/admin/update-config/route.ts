@@ -1,4 +1,5 @@
 export const dynamic = 'force-dynamic';
+
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
 
@@ -7,7 +8,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const allowedFields = ['session_start_time', 'is_active', 'current_session_number', 'between_session_seconds'];
+    const allowedFields = ['session_start_time', 'is_active', 'current_session_number', 'between_session_seconds', 'questions_per_session', 'seconds_per_question'];
 
     const updateData: Record<string, any> = { updated_at: new Date().toISOString() };
     for (const field of allowedFields) {

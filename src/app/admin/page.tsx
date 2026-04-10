@@ -29,6 +29,13 @@ export default function AdminPage() {
   const [message, setMessage] = useState('');
   const [editStartTime, setEditStartTime] = useState('');
 
+  // 게임 설정
+  const [settingsQCount, setSettingsQCount] = useState(20);
+  const [settingsSecs, setSettingsSecs] = useState(10);
+  const [settingsOptionsMin, setSettingsOptionsMin] = useState(2);
+  const [settingsOptionsMax, setSettingsOptionsMax] = useState(4);
+  const [settingsSaved, setSettingsSaved] = useState(false);
+
   // 전체 문제 생성 플로우
   const [genStep, setGenStep] = useState<'idle' | 'generating' | 'review'>('idle');
   const [genProgress, setGenProgress] = useState(0); // 생성 진행 세션 수
@@ -85,12 +92,13 @@ export default function AdminPage() {
     if (configRes.data) {
       setConfig(configRes.data);
       if (configRes.data.session_start_time) {
-        // UTC → 로컬 시간으로 변환해서 input에 표시
         const d = new Date(configRes.data.session_start_time);
         const offset = d.getTimezoneOffset() * 60000;
         const localISO = new Date(d.getTime() - offset).toISOString().slice(0, 16);
         setEditStartTime(localISO);
       }
+      setSettingsQCount(configRes.data.questions_per_session ?? 20);
+      setSettingsSecs(configRes.data.seconds_per_question ?? 10);
     }
     if (sessionsRes.data) setSessions(sessionsRes.data);
     if (participantsRes.data) setParticipants(participantsRes.data);
@@ -114,7 +122,7 @@ export default function AdminPage() {
         const res = await fetch('/api/admin/generate-questions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sessionNumber: i, count: 20 }),
+          body: JSON.stringify({ sessionNumber: i, count: settingsQCount, optionsMin: settingsOptionsMin, optionsMax: settingsOptionsMax }),
         });
         if (!res.ok) throw new Error(`세션 ${i} 생성 실패`);
         const { questions } = await res.json();
@@ -157,6 +165,27 @@ export default function AdminPage() {
       body: JSON.stringify({ session_start_time: new Date(editStartTime).toISOString() }),
     });
     if (res.ok) showMsg('✅ 시작 시간 저장 — 해당 시간에 자동으로 세션이 시작됩니다.');
+  };
+
+  const saveSettings = async () => {
+    if (settingsOptionsMin > settingsOptionsMax) {
+      showMsg('❌ 보기 최소값이 최대값보다 클 수 없습니다');
+      return;
+    }
+    const res = await fetch('/api/admin/update-config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        questions_per_session: settingsQCount,
+        seconds_per_question: settingsSecs,
+      }),
+    });
+    if (res.ok) {
+      setSettingsSaved(true);
+      setTimeout(() => setSettingsSaved(false), 3000);
+      showMsg('✅ 설정 저장 완료');
+      await loadAdminData();
+    }
   };
 
   const resetGame = async () => {
@@ -439,6 +468,67 @@ export default function AdminPage() {
                   {launching ? '시작 중...' : `▶ 세션 ${nextSessionNumber} 바로 시작`}
                 </button>
               )}
+            </div>
+
+            {/* 게임 설정 */}
+            <div className="bg-surface border border-border rounded-xl p-5">
+              <h2 className="font-semibold text-slate-200 mb-1">게임 설정</h2>
+              <p className="text-xs text-slate-500 mb-4">문제 생성 전에 설정해주세요. 이미 생성된 문제에는 적용되지 않습니다.</p>
+              <div className="grid grid-cols-2 gap-4 mb-4">
+                <div>
+                  <label className="text-xs text-slate-400 mb-1.5 block">세션당 문제 수</label>
+                  <div className="flex items-center gap-2">
+                    <input type="number" min={5} max={50} value={settingsQCount}
+                      onChange={(e) => setSettingsQCount(Number(e.target.value))}
+                      className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-white text-sm focus:outline-none focus:border-violet-500"
+                    />
+                    <span className="text-xs text-slate-500 flex-shrink-0">문제</span>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400 mb-1.5 block">문제당 시간</label>
+                  <div className="flex items-center gap-2">
+                    <input type="number" min={5} max={60} value={settingsSecs}
+                      onChange={(e) => setSettingsSecs(Number(e.target.value))}
+                      className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-white text-sm focus:outline-none focus:border-violet-500"
+                    />
+                    <span className="text-xs text-slate-500 flex-shrink-0">초</span>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400 mb-1.5 block">보기 최소 수</label>
+                  <div className="flex items-center gap-2">
+                    <input type="number" min={2} max={4} value={settingsOptionsMin}
+                      onChange={(e) => setSettingsOptionsMin(Number(e.target.value))}
+                      className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-white text-sm focus:outline-none focus:border-violet-500"
+                    />
+                    <span className="text-xs text-slate-500 flex-shrink-0">개</span>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400 mb-1.5 block">보기 최대 수</label>
+                  <div className="flex items-center gap-2">
+                    <input type="number" min={2} max={4} value={settingsOptionsMax}
+                      onChange={(e) => setSettingsOptionsMax(Number(e.target.value))}
+                      className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-white text-sm focus:outline-none focus:border-violet-500"
+                    />
+                    <span className="text-xs text-slate-500 flex-shrink-0">개</span>
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-slate-600">
+                  총 세션 시간: {settingsQCount * settingsSecs}초 ({Math.floor(settingsQCount * settingsSecs / 60)}분 {settingsQCount * settingsSecs % 60}초)
+                </p>
+                <button onClick={saveSettings}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    settingsSaved
+                      ? 'bg-neon/20 border border-neon/40 text-neon'
+                      : 'bg-violet-600/80 hover:bg-violet-600 text-white'
+                  }`}>
+                  {settingsSaved ? '✅ 저장됨' : '설정 저장'}
+                </button>
+              </div>
             </div>
 
             {/* 예약 시작 시간 */}

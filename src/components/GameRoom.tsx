@@ -78,14 +78,15 @@ export default function GameRoom({ nickname }: GameRoomProps) {
     setQuestions(qs);
     const startedAt = new Date(session.started_at!).getTime();
     const elapsed = Math.floor((Date.now() - startedAt) / 1000);
-    const totalSeconds = qs.length * 10;
+    const spq = config?.seconds_per_question ?? 10;
+    const totalSeconds = qs.length * spq;
     if (elapsed >= totalSeconds) {
       await checkMatches(session.id, session.session_number);
       setPhase('result');
       return;
     }
     setSessionElapsed(elapsed);
-    setCurrentQuestionIndex(Math.min(Math.floor(elapsed / 10), qs.length - 1));
+    setCurrentQuestionIndex(Math.min(Math.floor(elapsed / spq), qs.length - 1));
     setPhase('playing');
     startSessionTimer(session, qs, elapsed);
   };
@@ -93,12 +94,13 @@ export default function GameRoom({ nickname }: GameRoomProps) {
   const startSessionTimer = useCallback((session: GameSession, qs: Question[], startElapsed: number) => {
     if (sessionTimerRef.current) clearInterval(sessionTimerRef.current);
     let elapsed = startElapsed;
+    const spq = config?.seconds_per_question ?? 10;
     sessionTimerRef.current = setInterval(async () => {
       elapsed += 1;
       setSessionElapsed(elapsed);
-      const qIdx = Math.min(Math.floor(elapsed / 10), qs.length - 1);
+      const qIdx = Math.min(Math.floor(elapsed / spq), qs.length - 1);
       setCurrentQuestionIndex(qIdx);
-      if (elapsed >= qs.length * 10) {
+      if (elapsed >= qs.length * spq) {
         clearInterval(sessionTimerRef.current!);
         setPhase('result');
         await handleSessionEnd(session);
@@ -189,7 +191,8 @@ export default function GameRoom({ nickname }: GameRoomProps) {
     if (!currentSession) return;
     const nextQIdx = currentQuestionIndex + 1;
     if (nextQIdx >= questions.length) return;
-    const nextElapsed = nextQIdx * 10;
+    const spq = config?.seconds_per_question ?? 10;
+    const nextElapsed = nextQIdx * spq;
     setSessionElapsed(nextElapsed);
     setCurrentQuestionIndex(nextQIdx);
     if (sessionTimerRef.current) clearInterval(sessionTimerRef.current);
@@ -197,9 +200,9 @@ export default function GameRoom({ nickname }: GameRoomProps) {
     sessionTimerRef.current = setInterval(async () => {
       elapsed += 1;
       setSessionElapsed(elapsed);
-      const qIdx = Math.min(Math.floor(elapsed / 10), questions.length - 1);
+      const qIdx = Math.min(Math.floor(elapsed / spq), questions.length - 1);
       setCurrentQuestionIndex(qIdx);
-      if (elapsed >= questions.length * 10) {
+      if (elapsed >= questions.length * spq) {
         clearInterval(sessionTimerRef.current!);
         setPhase('result');
         await handleSessionEnd(currentSession);
@@ -279,7 +282,8 @@ export default function GameRoom({ nickname }: GameRoomProps) {
   };
 
   const currentQuestion = questions[currentQuestionIndex] || null;
-  const questionElapsed = sessionElapsed % 10;
+  const secsPerQ = config?.seconds_per_question ?? 10;
+  const questionElapsed = sessionElapsed % secsPerQ;
   const currentQuestionNumber = currentQuestion?.question_number ?? 1;
   const sessionNumber = config?.current_session_number ?? 0;
   const totalSessions = config?.total_sessions ?? 10;
@@ -366,10 +370,10 @@ export default function GameRoom({ nickname }: GameRoomProps) {
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs text-slate-500 font-medium">남은 시간</span>
                   <span className="text-xs text-slate-500">
-                    전체 {Math.max(0, questions.length * 10 - sessionElapsed)}초
+                    전체 {Math.max(0, questions.length * secsPerQ - sessionElapsed)}초
                   </span>
                 </div>
-                <Timer totalSeconds={10} elapsedSeconds={questionElapsed} />
+                <Timer totalSeconds={secsPerQ} elapsedSeconds={questionElapsed} />
               </div>
               <div className="flex-1">
                 <QuestionDisplay

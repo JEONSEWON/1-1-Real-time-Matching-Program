@@ -7,7 +7,7 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 
 export async function POST(req: NextRequest) {
   try {
-    const { sessionNumber, count = 20 } = await req.json();
+    const { sessionNumber, count = 20, optionsMin = 2, optionsMax = 4 } = await req.json();
 
     const prompt = `당신은 재미있는 취향 테스트 문제를 만드는 전문가입니다.
 
@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
 규칙:
 - 가볍고 재미있는 주제 (음식, 생활방식, 여행, 엔터테인먼트, 취미 등)
 - 진지하거나 민감한 주제 금지
-- 각 문제에 보기는 2~4개
+- 각 문제에 보기는 반드시 ${optionsMin}~${optionsMax}개 사이로 구성
 - 한국어로 작성
 - 매 세션마다 완전히 다른 주제
 
